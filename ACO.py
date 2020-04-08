@@ -1,108 +1,131 @@
-import numpy
-import warnings
-from src.Repo import Repo
-from numpy import array, power, newaxis, multiply
-from numpy import inf
-from numpy import ones
-from numpy import zeros
-from numpy import sum
+import math
+import random
+from matplotlib import pyplot as plt
 
 
-def run():
-    warnings.filterwarnings("ignore")
+class ACO:
+    class Edge:
+        def __init__(self, a, b, weight, initial_pheromone):
+            self.a = a
+            self.b = b
+            self.weight = weight
+            self.pheromone = initial_pheromone
 
-    repo = Repo("easy.txt")
+    class Ant:
+        def __init__(self, alpha, beta, num_nodes, edges):
+            self.alpha = alpha
+            self.beta = beta
+            self.num_nodes = num_nodes
+            self.edges = edges
+            self.tour = None
+            self.distance = 0.0
 
-    dist = array(repo.container['mat'])
-    iterations = 200
-    citiesNr = repo.container['nrNoduri']
-    antsNr = citiesNr
+        def _select_node(self):
+            roulette_wheel = 0.0
+            unvisited_nodes = [node for node in range(self.num_nodes) if node not in self.tour]
+            heuristic_total = 0.0
+            for unvisited_node in unvisited_nodes:
+                heuristic_total += self.edges[self.tour[-1]][unvisited_node].weight
+            for unvisited_node in unvisited_nodes:
+                roulette_wheel += pow(self.edges[self.tour[-1]][unvisited_node].pheromone, self.alpha) * \
+                                  pow((heuristic_total / self.edges[self.tour[-1]][unvisited_node].weight), self.beta)
+            random_value = random.uniform(0.0, roulette_wheel)
+            wheel_position = 0.0
+            for unvisited_node in unvisited_nodes:
+                wheel_position += pow(self.edges[self.tour[-1]][unvisited_node].pheromone, self.alpha) * \
+                                  pow((heuristic_total / self.edges[self.tour[-1]][unvisited_node].weight), self.beta)
+                if wheel_position >= random_value:
+                    return unvisited_node
 
-    evaporation_rate = 0.5
-    alpha = 1 #pheromone factor
-    beta = 2 #visibility factor
+        def find_tour(self):
+            self.tour = [random.randint(0, self.num_nodes - 1)]
+            while len(self.tour) < self.num_nodes:
+                self.tour.append(self._select_node())
+            return self.tour
 
-    #calculating the visibility of the next city
-    # visibility[i][j] = 1/dist[i][j]
+        def get_distance(self):
+            self.distance = 0.0
+            for i in range(self.num_nodes):
+                self.distance += self.edges[self.tour[i]][self.tour[(i + 1) % self.num_nodes]].weight
+            return self.distance
 
-    visibility = 1/dist
+    def __init__(self, colony_size=10, elitist_weight=1.0, min_scaling_factor=0.001, alpha=1.0, beta=3.0,
+                 rho=0.1, pheromone_deposit_weight=1.0, initial_pheromone=1.0, steps=100, nodes=None, labels=None):
 
-    visibility[visibility == inf] = 0
+        self.colony_size = colony_size
+        self.elitist_weight = elitist_weight
+        self.min_scaling_factor = min_scaling_factor
+        self.rho = rho
+        self.pheromone_deposit_weight = pheromone_deposit_weight
+        self.steps = steps
+        self.num_nodes = len(nodes)
+        self.nodes = nodes
+        if labels is not None:
+            self.labels = labels
+        else:
+            self.labels = range(1, self.num_nodes + 1)
+        self.edges = [[None] * self.num_nodes for _ in range(self.num_nodes)]
+        for i in range(self.num_nodes):
+            for j in range(i + 1, self.num_nodes):
+                self.edges[i][j] = self.edges[j][i] = self.Edge(i, j, math.sqrt(
+                    pow(self.nodes[i][0] - self.nodes[j][0], 2.0) + pow(self.nodes[i][1] - self.nodes[j][1], 2.0)),
+                                                                initial_pheromone)
+        self.ants = [self.Ant(alpha, beta, self.num_nodes, self.edges) for _ in range(self.colony_size)]
+        self.global_best_tour = None
+        self.global_best_distance = float("inf")
 
-    #initializing pheromone
+    def _add_pheromone(self, tour, distance, weight=1.0):
+        pheromone_to_add = self.pheromone_deposit_weight / distance
+        for i in range(self.num_nodes):
+            self.edges[tour[i]][tour[(i + 1) % self.num_nodes]].pheromone += weight * pheromone_to_add
 
-    pheromone = .1*ones((antsNr, citiesNr))
+    def _aco(self):
+        for step in range(self.steps):
+            for ant in self.ants:
+                self._add_pheromone(ant.find_tour(), ant.get_distance())
+                if ant.distance < self.global_best_distance:
+                    self.global_best_tour = ant.tour
+                    self.global_best_distance = ant.distance
+            self._add_pheromone(self.global_best_tour, self.global_best_distance, weight=self.elitist_weight)
+            for i in range(self.num_nodes):
+                for j in range(i + 1, self.num_nodes):
+                    self.edges[i][j].pheromone *= (1.0 - self.rho)
 
-    #initializing rute with len = citiesNr +1
-    #bcus we want to return to source city
+    def run(self):
+        print('Started running ...')
+        self._aco()
 
-    rute = ones((antsNr, citiesNr+1))
+        print('DONE')
+        print('Sequence : <- {0} ->'.format(' - '.join(str(self.labels[i]) for i in self.global_best_tour)))
+        print('Total distance travelled to complete the tour : {0}\n'.format(round(self.global_best_distance, 2)))
 
-    for ite in range(iterations):
-        rute[:,0] = 1
-        for i in range(antsNr):
-            temp_vis = array(visibility)
 
-            for j in range(citiesNr-1):
-                combine_feat = zeros(citiesNr)
-                cum_prob = zeros(citiesNr)
-
-                cur_loc = int(rute[i,j]-1)
-
-                temp_vis[:,cur_loc] = 0
-
-                p_feat = power(pheromone[cur_loc,:], beta)
-                v_feat = power(temp_vis[cur_loc,:], alpha)
-
-                p_feat = p_feat[:,newaxis]
-                v_feat = v_feat[:,newaxis]
-
-                combine_feat = multiply(p_feat, v_feat)
-
-                total = numpy.sum(combine_feat)
-
-                probs = combine_feat/total
-
-                cum_prob = numpy.cumsum(probs)
-
-                r = numpy.random.random_sample()
-
-                city = numpy.nonzero(cum_prob > r)[0][0] + 1
-
-                rute[i,j+1] = city
-
-            left = list(set([i for i in range(1, citiesNr+1)]) - set(rute[i,:-2]))[0]
-
-            rute[i,-2] = left
-
-        rute_opt = numpy.array(rute)
-
-        dist_cost = numpy.zeros((antsNr, 1))
-
-        for i in range(antsNr):
-
-            s = 0
-            for j in range(citiesNr-1):
-                s = s + dist[int(rute_opt[i,j])-1, int(rute_opt[i,j+1])-1]
-
-            dist_cost[i] = s
-
-        dist_min_loc = numpy.argmin(dist_cost)
-        dist_min_cost = dist_cost[dist_min_loc]
-
-        best_route = rute[dist_min_loc,:]
-        pheromone = (1-evaporation_rate)*pheromone
-
-        for i in range(antsNr):
-            for j in range(citiesNr-1):
-                dt = 1/dist_cost[i]
-                pheromone[int(rute_opt[i,j])-1, int(rute_opt[i,j+1])-1] += dt
-
-    print('route of all the ants at the end :')
-    print(rute_opt)
-    print()
-    print('best path :', best_route)
-    print('cost of the best path', int(dist_min_cost[0]) + dist[int(best_route[-2]) - 1, 0])
+def loadBerlin52():
+    data = {}
+    f = open("berlin52.txt")
+    lines = f.readlines()
+    data['nrNoduri'] = len(lines)
+    nodes = [[0,0] for _ in range(len(lines))]
+    mat = [[0 for _ in range(len(lines))] for _ in range(len(lines))]
+    for i in range(len(lines)):
+        nodes[i] = [int(lines[i].split(' ')[0]), int(lines[i].split(' ')[1])]
+        for j in range(len(lines)):
+            coords_1 = lines[i].split(' ')
+            coords_2 = lines[j].split(' ')
+            x1, y1 = int(coords_1[0]), int(coords_1[1])
+            x2, y2 = int(coords_2[0]), int(coords_2[1])
+            dist = ((x1 - x2) ** 2 + (y1 - y2) ** 2) ** 0.5
+            mat[i][j] = dist
+    data['mat'] = mat
+    data['nodes'] = nodes
+    return data
 
 if __name__ == '__main__':
-    run()
+
+    _nodes = loadBerlin52()['nodes']
+    _colony_size = 52
+    _steps = 100
+
+    elitist = ACO(colony_size=_colony_size, steps=_steps, nodes=_nodes)
+    elitist.run()
+
